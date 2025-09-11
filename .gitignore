@@ -1,5 +1,2 @@
-# Ignorar el directorio "data"
-/data/
-
-# Ignorar el archivo ".env"
 .env
+/data/

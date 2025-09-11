@@ -1,20 +1,20 @@
-# Usa una imagen de Node.js
-FROM node:16
+# Use a Node.js image
+FROM node:22.18.0
 
-# Crea un directorio para la aplicación
+# Create a directory for the application
 WORKDIR /usr/src/app
 
-# Copia los archivos de configuración de la aplicación
+# Copy the application configuration files
 COPY package*.json ./
 
-# Instala las dependencias de la aplicación
+# Install the application dependencies
 RUN npm install
 
-# Copia el resto de los archivos de la aplicación
+# Copy the rest of the application files
 COPY . .
 
-# Expone el puerto que tu aplicación utiliza
+# Expose the port that your application uses
 EXPOSE 8080
 
-# Inicia la aplicación
+# Start the application
 CMD [ "node", "app.js" ]

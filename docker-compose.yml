@@ -8,6 +8,6 @@ services:
       .env
     restart: always
     ports:
-      - 1111:8080
+      - 1818:8080
     volumes:
       - ./data:/usr/src/app/data
