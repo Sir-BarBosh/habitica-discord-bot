@@ -1,4 +1,4 @@
-version: "3.1"
+version: "3.8"
 services:
   habitica-discord-bot:
     image: habitica-discord-bot
@@ -8,6 +8,6 @@ services:
       .env
     restart: always
     ports:
-      - 1818:8080
+      - "1818:8080"
     volumes:
       - ./data:/usr/src/app/data
