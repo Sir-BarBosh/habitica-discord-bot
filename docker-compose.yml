@@ -9,5 +9,3 @@ services:
     restart: always
     ports:
       - "1818:8080"
-    volumes:
-      - ./data:/usr/src/app/data
