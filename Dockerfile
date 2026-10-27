@@ -1,17 +1,20 @@
-# Use a Node.js image
+# Use an Node.js image
 FROM node:alpine
 
-# Create a directory for the application
+# Create a directory for the application and set ownership
 WORKDIR /usr/src/app
 
-# Copy the application configuration files
+# Copy dependency files first for layer caching
 COPY package*.json ./
 
-# Install the application dependencies
-RUN npm install
+# Install production dependencies
+RUN npm ci --omit=dev
 
-# Copy the rest of the application files
-COPY . .
+# Copy application files with appropriate ownership
+COPY --chown=node:node . .
+
+# Drop privileges to non-root user
+USER node
 
 # Expose the port that your application uses
 EXPOSE 8080

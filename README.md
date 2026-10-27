@@ -26,6 +26,7 @@ This bot listens for Habitica webhooks and sends activity updates to a specified
     GUILD_ID=YOUR_DISCORD_SERVER_ID_HERE
     DISCORD_CHANNEL_ID=YOUR_DISCORD_CHANNEL_ID_HERE
     USERS=HABITICA_USER_ID_1:DiscordName1,HABITICA_USER_ID_2:DiscordName2
+    WEBHOOK_SECRET=YOUR_OPTIONAL_SECRET_TOKEN
     ```
     *   **`DISCORD_BOT_TOKEN`**: Your Discord bot token.
     *   **`CLIENT_ID`**: The client ID of your Discord bot (found in the Discord Developer Portal).
@@ -34,6 +35,7 @@ This bot listens for Habitica webhooks and sends activity updates to a specified
     *   **`DISCORD_CHANNEL_ID`**: The ID of the Discord channel where the bot should post messages.
         *   To get your Channel ID: Right-click on the channel name in Discord and select "Copy ID".
     *   **`USERS`**: A comma-separated list mapping Habitica User IDs to the Discord display names you want the bot to use. Example: `habiticaUserID1:MyDiscordName,habiticaUserID2:AnotherDiscordName`. Your Habitica `userId` is the UUID in your profile URL (e.g., `habitica.com/profile/[UUID]`).
+    *   **`WEBHOOK_SECRET`**: (Recommended) A secret token used to authenticate incoming webhook requests from Habitica to prevent unauthorized requests.
 
 3.  **Install Dependencies:**
     ```bash
@@ -72,6 +74,7 @@ Finally, you need to configure a webhook in your Habitica settings to send data 
 1.  Go to your [Habitica settings](https://habitica.com/user/settings/site).
 2.  Add a new webhook URL.
     *   If hosting locally, the format will be `http://<your-ip>:8080/webhook`.
+    *   If using `WEBHOOK_SECRET`, append the secret as a query parameter: `http://<your-ip>:8080/webhook?secret=YOUR_SECRET_TOKEN`
     *   **Important:** Habitica webhooks may not be sent to insecure (HTTP) URLs from external networks. It's highly recommended to use a reverse proxy (like Caddy, Nginx, or Apache) to serve your bot over HTTPS.
 
 **Caddy Reverse Proxy Example:**
@@ -81,7 +84,7 @@ Finally, you need to configure a webhook in your Habitica settings to send data 
     reverse_proxy host.docker.internal:8080
 }
 ```
-In this case, the webhook URL would look like `https://<your-domain>.com/webhook`.
+In this case, the webhook URL would look like `https://<your-domain>.com/webhook?secret=YOUR_SECRET_TOKEN`.
 
 ## Features
 

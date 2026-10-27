@@ -1,52 +1,77 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
-const { EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, EmbedBuilder } = require('discord.js');
 const express = require('express');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
+
 const app = express();
 
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-let channelId = process.env.DISCORD_CHANNEL_ID;
+const channelId = process.env.DISCORD_CHANNEL_ID;
 
-// Split users chain
-let users = process.env.USERS.split(',');
-// Create a onject to map the name and user ID
-let userIdToName = {};
-for (let user of users) {
-  let [id, name] = user.split(':');
-  userIdToName[id] = name;
+// Parse mapped users safely
+const users = (process.env.USERS || '').split(',').filter(Boolean);
+const userIdToName = {};
+for (const user of users) {
+  const [id, name] = user.split(':');
+  if (id && name) {
+    userIdToName[id.trim()] = name.trim();
+  }
 }
 
 // Webhook endpoint
-
 app.post('/webhook', (req, res) => {
-  let data = req.body.payload ? JSON.parse(req.body.payload) : req.body;
+  // Authentication check
+  const webhookSecret = process.env.WEBHOOK_SECRET;
+  if (webhookSecret) {
+    const providedSecret = req.query.secret
+      || req.headers['x-webhook-secret']
+      || (req.headers.authorization && req.headers.authorization.replace(/^Bearer\s+/i, ''));
 
+    if (providedSecret !== webhookSecret) {
+      console.warn('[SECURITY] Unauthorized webhook attempt rejected');
+      return res.status(401).json({ error: 'Unauthorized: Invalid or missing webhook secret' });
+    }
+  }
+
+  // Parse and validate incoming payload safely
+  let data;
+  try {
+    data = req.body && req.body.payload ? JSON.parse(req.body.payload) : req.body;
+  } catch (err) {
+    console.error('[ERROR] Failed to parse webhook payload JSON:', err.message);
+    return res.status(400).json({ error: 'Invalid JSON payload' });
+  }
+
+  if (!data || typeof data !== 'object' || !data.task || typeof data.task !== 'object') {
+    return res.status(400).json({ error: 'Malformed payload: missing task object' });
+  }
+
+  // Acknowledge receipt to the webhook sender
   res.sendStatus(200);
 
+  // Safely extract properties with bounds/fallbacks
+  const rawTaskText = typeof data.task.text === 'string' ? data.task.text : 'Unknown task';
+  const task = rawTaskText.slice(0, 200);
+  const streak = Number.isFinite(data.task.streak) ? data.task.streak : 0;
+  const reward = typeof data.task.text === 'string' ? data.task.text.slice(0, 200) : 'Reward';
+  const counterUp = Number.isFinite(data.task.counterUp) ? data.task.counterUp : 0;
+  const counterDown = Number.isFinite(data.task.counterDown) ? data.task.counterDown : 0;
+  const habitCounter = counterUp - counterDown;
 
-  const task = data.task.text;
-  const streak = data.task.streak;
-  const reward = data.task.text;
-  const counterUp = data.task.counterUp;
-  const counterDown = data.task.counterDown;
+  const userId = data.task.userId || (data.user && data.user._id);
+  const userName = (userId && userIdToName[userId]) ? userIdToName[userId] : 'Habitica User';
 
-  // Obtains the user name from the user ID
-
-  let userName = userIdToName[data.task.userId];
-
-  //Embeds
-
+  // Embeds
   // Task completed
   const taskUp = new EmbedBuilder()
     .setAuthor({
       name: "Task completed",
       url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/QeqL3hz.png", //
+      iconURL: "https://i.imgur.com/QeqL3hz.png",
     })
     .setTitle(`${userName} - ${task}`)
     .setURL("https://habitica.com")
@@ -64,7 +89,7 @@ app.post('/webhook', (req, res) => {
     .setAuthor({
       name: "Task unchecked",
       url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/e2c2CZl.png", //
+      iconURL: "https://i.imgur.com/e2c2CZl.png",
     })
     .setTitle(`${userName} - ${task}`)
     .setURL("https://habitica.com")
@@ -82,11 +107,11 @@ app.post('/webhook', (req, res) => {
     .setAuthor({
       name: "Progress in a habit",
       url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/IEP0zOA.png", //
+      iconURL: "https://i.imgur.com/IEP0zOA.png",
     })
     .setTitle(`${userName} - ${task}`)
     .setURL("https://habitica.com")
-    .setDescription(`Has progressed in the habit **${task}**. Current counter: **${(data.task.counterUp || 0) - (data.task.counterDown || 0)}**`)
+    .setDescription(`Has progressed in the habit **${task}**. Current counter: **${habitCounter}**`)
     .setThumbnail("https://i.imgur.com/PU7Wzos.png")
     .setColor("#B3508D")
     .setFooter({
@@ -95,17 +120,16 @@ app.post('/webhook', (req, res) => {
     })
     .setTimestamp();
 
-  // Habit progress down
-
+  // Habit setback down
   const habitDown = new EmbedBuilder()
     .setAuthor({
       name: "Setback in a habit",
       url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/GZpw4VK.png", //
+      iconURL: "https://i.imgur.com/GZpw4VK.png",
     })
     .setTitle(`${userName} - ${task}`)
     .setURL("https://habitica.com")
-    .setDescription(`Has regressed in the habit **${task}**. Current counter: **${(counterUp || 0) - (counterDown || 0)}**`)
+    .setDescription(`Has regressed in the habit **${task}**. Current counter: **${habitCounter}**`)
     .setThumbnail("https://i.imgur.com/PU7Wzos.png")
     .setColor("#3973AD")
     .setFooter({
@@ -114,12 +138,12 @@ app.post('/webhook', (req, res) => {
     })
     .setTimestamp();
 
-  // TODO task compelted
+  // TODO task completed
   const todoUp = new EmbedBuilder()
     .setAuthor({
       name: "Task completed",
       url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/QeqL3hz.png", //
+      iconURL: "https://i.imgur.com/QeqL3hz.png",
     })
     .setTitle(`${userName}`)
     .setURL("https://habitica.com")
@@ -130,13 +154,14 @@ app.post('/webhook', (req, res) => {
       text: "Habitica Bot",
       iconURL: "https://i.imgur.com/PU7Wzos.png",
     })
-    .setTimestamp();  
-  //Reward claimed
+    .setTimestamp();
+
+  // Reward claimed
   const rewardUp = new EmbedBuilder()
     .setAuthor({
       name: "Reward Claimed",
       url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/A3A5mFy.png", //
+      iconURL: "https://i.imgur.com/A3A5mFy.png",
     })
     .setTitle(`${userName}`)
     .setURL("https://habitica.com")
@@ -147,230 +172,110 @@ app.post('/webhook', (req, res) => {
       text: "Habitica Bot",
       iconURL: "https://i.imgur.com/PU7Wzos.png",
     })
-    .setTimestamp(); 
-  
-  // Sends a embed depending on the Type of task and the direction (up or down)
-  let channel = client.channels.cache.get(channelId); 
-  if (channel) {
-    if (data.task.type === 'habit' && data.direction === 'down') {
-      channel.send({ embeds: [habitDown] });
-    } else if (data.task.type === 'habit' && data.direction === 'up') {
-      channel.send({ embeds: [habitUp] });
-    } else if (data.task.type === 'daily' && data.direction === 'down') {
-      channel.send({ embeds: [taskDown] });
-    } else if (data.task.type === 'daily' && data.direction === 'up'){
-      channel.send({ embeds: [taskUp] });
-    } else if (data.task.type === 'todo' && data.direction === 'up'){
-      channel.send({ embeds: [todoUp] });
-    } else if (data.task.type === 'todo' && data.direction === 'down'){
-      channel.send({ embeds: [taskDown] });
-    } else if (data.task.type === 'reward'){
-      channel.send({ embeds: [rewardUp] });
-    } else{
-      channel.send(`hmmm something went wrong <@!418341963570479124>`);
-    }
+    .setTimestamp();
+
+  // Select embed based on task type and direction
+  let embedToSend = null;
+  const taskType = data.task.type;
+  const direction = data.direction;
+
+  if (taskType === 'habit' && direction === 'down') {
+    embedToSend = habitDown;
+  } else if (taskType === 'habit' && direction === 'up') {
+    embedToSend = habitUp;
+  } else if (taskType === 'daily' && direction === 'down') {
+    embedToSend = taskDown;
+  } else if (taskType === 'daily' && direction === 'up') {
+    embedToSend = taskUp;
+  } else if (taskType === 'todo' && direction === 'up') {
+    embedToSend = todoUp;
+  } else if (taskType === 'todo' && direction === 'down') {
+    embedToSend = taskDown;
+  } else if (taskType === 'reward') {
+    embedToSend = rewardUp;
+  } else {
+    console.warn(`[WARN] Unrecognized task event received: type="${taskType}", direction="${direction}"`);
+  }
+
+  // Sends the embed to the configured Discord channel
+  const channel = client.channels.cache.get(channelId);
+  if (!channel) {
+    console.warn(`[WARN] Discord channel ID not found in cache or invalid: ${channelId}`);
+    return;
+  }
+
+  if (embedToSend) {
+    channel.send({ embeds: [embedToSend] }).catch(err => {
+      console.error('[ERROR] Failed to send embed to Discord channel:', err.message);
+    });
   }
 });
 
-// Intents
-
+// Discord Client Setup (Least Privilege Intents)
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
   ],
 });
 
+// Command Collection Setup
 client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-
-for (const file of commandFiles) {
-	const filePath = path.join(commandsPath, file);
-	const command = require(filePath);
-	// Set a new item in the Collection with the key as the command name and the value as the exported module
-	if ('data' in command && 'execute' in command) {
-		client.commands.set(command.data.name, command);
-	} else {
-		console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
-	}
+if (fs.existsSync(commandsPath)) {
+  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+  for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    try {
+      const command = require(filePath);
+      if ('data' in command && 'execute' in command) {
+        client.commands.set(command.data.name, command);
+      } else {
+        console.warn(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
+      }
+    } catch (err) {
+      console.error(`[ERROR] Failed to load command at ${filePath}:`, err.message);
+    }
+  }
 }
 
 client.on('interactionCreate', async interaction => {
-	if (!interaction.isChatInputCommand()) return;
+  if (!interaction.isChatInputCommand()) return;
 
-	const command = client.commands.get(interaction.commandName);
+  const command = client.commands.get(interaction.commandName);
+  if (!command) return;
 
-	if (!command) return;
-
-	try {
-		await command.execute(interaction);
-	} catch (error) {
-		console.error(error);
-		if (interaction.replied || interaction.deferred) {
-			await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
-		} else {
-			await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
-		}
-	}
+  try {
+    await command.execute(interaction);
+  } catch (error) {
+    console.error('[ERROR] Interaction execution error:', error);
+    const replyPayload = { content: 'There was an error while executing this command!', ephemeral: true };
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(replyPayload).catch(console.error);
+    } else {
+      await interaction.reply(replyPayload).catch(console.error);
+    }
+  }
 });
 
+// Client Lifecycle & Server Start
+const port = process.env.PORT || 8080;
 
-// Discord bot token
-client.login(process.env.DISCORD_BOT_TOKEN);
-
-// Webhook listener
 client.once('clientReady', () => {
-  console.log('Bot is ready!');
-  const listener = app.listen(8080, () => {
-    console.log('Your app is listening on port ' + listener.address().port);
+  console.log(`Bot is ready! Logged in as ${client.user?.tag || 'Discord Bot'}`);
+  if (!process.env.WEBHOOK_SECRET) {
+    console.warn('[SECURITY WARNING] WEBHOOK_SECRET is not configured. Webhook endpoint is currently unauthenticated.');
+  }
+
+  const listener = app.listen(port, () => {
+    console.log(`Webhook server listening on port ${listener.address().port}`);
   });
 });
 
-app.post('/webhook', (req, res) => {
-  let data = req.body.payload ? JSON.parse(req.body.payload) : req.body;
-
-  res.sendStatus(200);
-
-  const task = data.task.text;
-  const streak = data.task.streak;
-  const reward = data.task.text;
-
-  // Obtains the user name from the user ID
-  let userName = userIdToName[data.task.userId];
-
-  //Embeds
-  // Task completed
-  const taskUp = new EmbedBuilder()
-    .setAuthor({
-      name: "Task completed",
-      url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/QeqL3hz.png", //
-    })
-    .setTitle(`${userName}`)
-    .setURL("https://habitica.com")
-    .setDescription(`Has completed the task **${task}** and is on a streak of **${streak}** days`)
-    .setThumbnail("https://i.imgur.com/PU7Wzos.png")
-    .setColor("#A3C255")
-    .setFooter({
-      text: "Habitica Bot",
-      iconURL: "https://i.imgur.com/PU7Wzos.png",
-    })
-    .setTimestamp();
-
-  // Task unchecked
-  const taskDown = new EmbedBuilder()
-    .setAuthor({
-      name: "Task unchecked",
-      url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/e2c2CZl.png", //
-    })
-    .setTitle(`${userName}`)
-    .setURL("https://habitica.com")
-    .setDescription(`Has unchecked the task **${task}** and has decreased their score`)
-    .setThumbnail("https://i.imgur.com/PU7Wzos.png")
-    .setColor("#B34428")
-    .setFooter({
-      text: "Habitica Bot",
-      iconURL: "https://i.imgur.com/PU7Wzos.png",
-    })
-    .setTimestamp();
-
-  // Habit progress up
-  const habitUp = new EmbedBuilder()
-    .setAuthor({
-      name: "Progress in a habit",
-      url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/IEP0zOA.png", //
-    })
-    .setTitle(`${userName}`)
-    .setURL("https://habitica.com")
-    .setDescription(`Has progressed in the habit **${task}**`)
-    .setThumbnail("https://i.imgur.com/PU7Wzos.png")
-    .setColor("#B3508D")
-    .setFooter({
-      text: "Habitica Bot",
-      iconURL: "https://i.imgur.com/PU7Wzos.png",
-    })
-    .setTimestamp();
-
-  // Habit progress down
-  const habitDown = new EmbedBuilder()
-    .setAuthor({
-      name: "Setback in a habit",
-      url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/GZpw4VK.png", //
-    })
-    .setTitle(`${userName}`)
-    .setURL("https://habitica.com")
-    .setDescription(`Has regressed in the habit **${task}**`)
-    .setThumbnail("https://i.imgur.com/PU7Wzos.png")
-    .setColor("#3973AD")
-    .setFooter({
-      text: "Habitica Bot",
-      iconURL: "https://i.imgur.com/PU7Wzos.png",
-    })
-    .setTimestamp();
-
-  // TODO task compelted
-  const todoUp = new EmbedBuilder()
-    .setAuthor({
-      name: "Task completed",
-      url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/QeqL3hz.png", //
-    })
-    .setTitle(`${userName}`)
-    .setURL("https://habitica.com")
-    .setDescription(`Has completed the task **${task}**`)
-    .setThumbnail("https://i.imgur.com/PU7Wzos.png")
-    .setColor("#A3C255")
-    .setFooter({
-      text: "Habitica Bot",
-      iconURL: "https://i.imgur.com/PU7Wzos.png",
-    })
-    .setTimestamp();
-  //Reward claimed
-  const rewardUp = new EmbedBuilder()
-    .setAuthor({
-      name: "Reward Claimed",
-      url: "https://github.com/NereaCassian/habitica-discord-bot",
-      iconURL: "https://i.imgur.com/A3A5mFy.png", //
-    })
-    .setTitle(`${userName}`)
-    .setURL("https://habitica.com")
-    .setDescription(`Has claimed the reward **${reward}**`)
-    .setThumbnail("https://i.imgur.com/PU7Wzos.png")
-    .setColor("#FEEA00")
-    .setFooter({
-      text: "Habitica Bot",
-      iconURL: "https://i.imgur.com/PU7Wzos.png",
-    })
-    .setTimestamp();
-
-  // Sends a embed depending on the Type of task and the direction (up or down)
-  let channel = client.channels.cache.get(channelId);
-  if (channel) {
-    console.log(`Found channel: ${channel.name}`);
-    if (data.task.type === 'habit' && data.direction === 'down') {
-      channel.send({ embeds: [habitDown] });
-    } else if (data.task.type === 'habit' && data.direction === 'up') {
-      channel.send({ embeds: [habitUp] });
-    } else if (data.task.type === 'daily' && data.direction === 'down') {
-      channel.send({ embeds: [taskDown] });
-    } else if (data.task.type === 'daily' && data.direction === 'up'){
-      channel.send({ embeds: [taskUp] });
-    } else if (data.task.type === 'todo' && data.direction === 'up'){
-      channel.send({ embeds: [todoUp] });
-    } else if (data.task.type === 'todo' && data.direction === 'down'){
-      channel.send({ embeds: [taskDown] });
-    } else if (data.task.type === 'reward'){
-      channel.send({ embeds: [rewardUp] });
-    } else{
-      channel.send(`hmmm something went wrong <@!418341963570479124>`);
-    }
-  } else {
-    console.log(`Channel ID not found in .env or invalid: ${channelId}`);
-  }
-});
+if (!process.env.DISCORD_BOT_TOKEN) {
+  console.error('[FATAL] DISCORD_BOT_TOKEN is missing in environment.');
+} else {
+  client.login(process.env.DISCORD_BOT_TOKEN).catch(err => {
+    console.error('[FATAL] Failed to login to Discord:', err.message);
+  });
+}
